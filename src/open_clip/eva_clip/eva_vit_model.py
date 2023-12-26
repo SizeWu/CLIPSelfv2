@@ -220,7 +220,7 @@ class Attention(nn.Module):
                     scale=self.scale,
                     attn_bias=attn_mask  # to allow masked attention
                 )
-                x = (x_q + x_k) * 0.5
+                x = (x_q + x_k)
             else:
                 x = xops.memory_efficient_attention(
                     q, k, v,
