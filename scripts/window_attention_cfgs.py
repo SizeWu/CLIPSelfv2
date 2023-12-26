@@ -10,9 +10,9 @@ vitl14_ss16 = {i: dict(window_size=16,    # 1/4 for 896
                                         + list(range(12, 17)) + list(range(18, 23))}
 
 
-vitb16_ms = {i: dict(window_size=8, shift=0) for i in range(4-1)}
-vitb16_ms.update({i: dict(window_size=16, shift=0) for i in range(4, 8-1)})
-vitb16_ms.update({i: dict(window_size=32, shift=0) for i in range(8, 12-1)})
+vitb16_ms = {i: dict(window_size=8, shift=0) for i in [0, 4, 8]}
+vitb16_ms.update({i: dict(window_size=16, shift=0) for i in [1, 5, 9]})
+vitb16_ms.update({i: dict(window_size=32, shift=0) for i in [2, 6, 10]})
 
 vitl14_ms = {i: dict(window_size=4, shift=0) for i in range(8-1)}
 vitl14_ms.update({i: dict(window_size=8, shift=0) for i in range(8, 16-1)})
