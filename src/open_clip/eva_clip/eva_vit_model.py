@@ -29,7 +29,7 @@ except ImportError:
     xops = None
     print("Please 'pip install xformers'")
 from typing import Sequence
-from open_clip.window_attentions import window_partition, window_unpartition
+from open_clip.window_operations import window_partition, window_unpartition
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
@@ -585,7 +585,7 @@ class EVAVisionTransformer(nn.Module):
         x = self.head(x)
         return x
 
-    def encode_dense(self, x, keep_shape=True, window_size=None, window_block_indexes=[]):
+    def encode_dense(self, x, keep_shape=True, window_attention=dict()):
         bs, _, h, w = x.shape
         h = h // self.patch_embed.patch_size[0]
         w = w // self.patch_embed.patch_size[1]
@@ -612,7 +612,8 @@ class EVAVisionTransformer(nn.Module):
 
         rel_pos_bias = self.rel_pos_bias() if self.rel_pos_bias is not None else None
         for blk_idx, blk in enumerate(self.blocks[:-1]):
-            if blk_idx in window_block_indexes:
+            if blk_idx in window_attention:
+                window_size = window_attention[blk_idx]['window_size']
                 # TODO: window attention
                 # x: bs, sq_len, c
                 x_windows, pad_hw = window_partition(x, window_size=window_size)
@@ -633,8 +634,7 @@ class EVAVisionTransformer(nn.Module):
 
     def extract_roi_features(self, x, normed_boxes, **kwargs):
         x = self.encode_dense(x, keep_shape=True,
-                              window_size=kwargs.get('window_size', None),
-                              window_block_indexes=kwargs.get('window_block_indexes', []))
+                              window_attention=kwargs.get('window_attention', dict()))
 
         return roi_align(x, self._denormalize_boxes(normed_boxes, x), (1, 1),
                          1.0, -1, True)[..., 0, 0]
@@ -655,8 +655,7 @@ class EVAVisionTransformer(nn.Module):
 
     def mask_pool(self, x, masks, **kwargs):
         feature_map = self.encode_dense(x, keep_shape=False,
-                                        window_size=kwargs.get('window_size', None),
-                                        window_block_indexes=kwargs.get('window_block_indexes', []))
+                                        window_attention=kwargs.get('window_attention', dict()))
         num_masks_per_image = [len(masks_per_image) for masks_per_image in masks]
         masks = torch.cat(masks).float().flatten(-2, -1)    # bs, h*w
         feature_map = torch.repeat_interleave(

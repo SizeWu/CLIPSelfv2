@@ -6,4 +6,4 @@ torchrun --nproc_per_node 8 -m training.main --batch-size=1 \
 --embed-path metadata/coco_panoptic_clip_hand_craft_EVACLIP_ViTB16.npy \
 --val-image-root data/coco/val2017  --cache-dir $CHECKPOINT --extract-type="v2" \
 --name $NAME --downsample-factor 16 --det-image-size 1024 \
---window-attention vitb16_ss16
+--window-attention vitb16_ms
