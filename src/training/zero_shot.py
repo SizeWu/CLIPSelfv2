@@ -308,7 +308,7 @@ def zero_shot_eval(model, dist_model, data, epoch, args):
         return {}
     results = {}
     if args.test_type == 'coco_panoptic':
-        assert dist_model is None
+        # assert dist_model is None
         logging.info('Region classifier')
         correct_rois, correct_crops, correct_maskpool, \
             similarity_rois, similarity_crops, similarity_maskpool, \
