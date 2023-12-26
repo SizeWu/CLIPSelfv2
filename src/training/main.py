@@ -345,7 +345,7 @@ def main(args):
             test_model.load_state_dict(target_state_dict)
             if args.distributed:
                 test_model = torch.nn.parallel.DistributedDataParallel(test_model, device_ids=[device], **ddp_args)
-            evaluate(test_model, data, completed_epoch, args)
+            evaluate(test_model, None, data, completed_epoch, args)
             del test_model
 
 
