@@ -71,12 +71,14 @@ def run(model, dataloader, args):
                 roi_extractor = module.encode_pseudo_boxes
                 roi_features = roi_extractor(images, rois, normalize=True,
                                              extract_type=args.extract_type,
-                                             window_attention=args.window_attention)
+                                             window_attention=args.window_attention,
+                                             correlative_attention=args.correlative_attention)
                 mask_pooler = module.encode_masks
                 maskpool_features = mask_pooler(images, gt_masks_list,
                                                 normalize=True,
                                                 mask_attn=args.extract_type == "v1",
-                                                window_attention=args.window_attention)
+                                                window_attention=args.window_attention,
+                                                correlative_attention=args.correlative_attention)
                 # New way to obtain crop features
                 if args.image_ave_pool:
                     feature_map = module.visual.encode_dense(image_crops, keep_shape=True)

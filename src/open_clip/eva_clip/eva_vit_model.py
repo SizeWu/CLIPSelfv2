@@ -171,7 +171,7 @@ class Attention(nn.Module):
 
         self.rope = rope
 
-    def forward(self, x, rel_pos_bias=None, attn_mask=None):
+    def forward(self, x, rel_pos_bias=None, attn_mask=None, correlative_attention=False):
         B, N, C = x.shape
         if self.subln: 
             q = F.linear(input=x, weight=self.q_proj.weight, bias=self.q_bias)
@@ -202,18 +202,32 @@ class Attention(nn.Module):
             k_t = k[:, :, 1:, :]
             ro_k_t = self.rope(k_t)
             k = torch.cat((k[:, :, :1, :], ro_k_t), -2).type_as(v)
-
+        assert self.xattn, "For now we only use xattn"
         if self.xattn:
             q = q.permute(0, 2, 1, 3)   # B, num_heads, N, C -> B, N, num_heads, C
             k = k.permute(0, 2, 1, 3)
             v = v.permute(0, 2, 1, 3)
-
-            x = xops.memory_efficient_attention(
-                q, k, v,
-                p=self.xattn_drop,
-                scale=self.scale,
-                attn_bias=attn_mask   # to allow masked attention
+            if correlative_attention:
+                x_q = xops.memory_efficient_attention(
+                    q, q, v,
+                    p=self.xattn_drop,
+                    scale=self.scale,
+                    attn_bias=attn_mask  # to allow masked attention
                 )
+                x_k = xops.memory_efficient_attention(
+                    k, k, v,
+                    p=self.xattn_drop,
+                    scale=self.scale,
+                    attn_bias=attn_mask  # to allow masked attention
+                )
+                x = (x_q + x_k) * 0.5
+            else:
+                x = xops.memory_efficient_attention(
+                    q, k, v,
+                    p=self.xattn_drop,
+                    scale=self.scale,
+                    attn_bias=attn_mask   # to allow masked attention
+                    )
             x = x.reshape(B, N, -1)
             x = self.inner_attn_ln(x)
             x = self.proj(x)
@@ -297,20 +311,28 @@ class Block(nn.Module):
 
         self.postnorm = postnorm
 
-    def forward(self, x, rel_pos_bias=None, attn_mask=None):
+    def forward(self, x, rel_pos_bias=None, attn_mask=None, correlative_attention=False):
         if self.gamma_1 is None:
             if self.postnorm:
-                x = x + self.drop_path(self.norm1(self.attn(x, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask)))
+                x = x + self.drop_path(self.norm1(self.attn(
+                    x, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask,
+                    correlative_attention=correlative_attention)))
                 x = x + self.drop_path(self.norm2(self.mlp(x)))
             else:
-                x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask))
+                x = x + self.drop_path(self.attn(
+                    self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask,
+                    correlative_attention=correlative_attention))
                 x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
             if self.postnorm:
-                x = x + self.drop_path(self.gamma_1 * self.norm1(self.attn(x, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask)))
+                x = x + self.drop_path(self.gamma_1 * self.norm1(self.attn(
+                    x, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask,
+                    correlative_attention=correlative_attention)))
                 x = x + self.drop_path(self.gamma_2 * self.norm2(self.mlp(x)))
             else:
-                x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask))
+                x = x + self.drop_path(self.gamma_1 * self.attn(
+                    self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask,
+                    correlative_attention=correlative_attention))
                 x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x
 
@@ -585,7 +607,8 @@ class EVAVisionTransformer(nn.Module):
         x = self.head(x)
         return x
 
-    def encode_dense(self, x, keep_shape=True, window_attention=dict()):
+    def encode_dense(self, x, keep_shape=True, window_attention=dict(),
+                     correlative_attention=False):
         bs, _, h, w = x.shape
         h = h // self.patch_embed.patch_size[0]
         w = w // self.patch_embed.patch_size[1]
@@ -617,12 +640,18 @@ class EVAVisionTransformer(nn.Module):
                 # TODO: window attention
                 # x: bs, sq_len, c
                 x_windows, pad_hw = window_partition(x, window_size=window_size)
-                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias)
+                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias,
+                                correlative_attention=correlative_attention)
                 x = window_unpartition(x_windows, window_size=window_size,
                                        hw=(h, w), pad_hw=pad_hw)
             else:
-                x = blk(x, rel_pos_bias=rel_pos_bias)
-        x = self.blocks[-1].forward_without_attn(x)[:, 1:]
+                x = blk(x, rel_pos_bias=rel_pos_bias,
+                        correlative_attention=correlative_attention)
+        if correlative_attention:
+            x = self.blocks[-1](x, rel_pos_bias=rel_pos_bias,
+                                correlative_attention=correlative_attention)[:, 1:]
+        else:
+            x = self.blocks[-1].forward_without_attn(x)[:, 1:]
         x = self.norm(x)
         x = self.head(x)
         assert self.fc_norm is None
@@ -634,7 +663,8 @@ class EVAVisionTransformer(nn.Module):
 
     def extract_roi_features(self, x, normed_boxes, **kwargs):
         x = self.encode_dense(x, keep_shape=True,
-                              window_attention=kwargs.get('window_attention', dict()))
+                              window_attention=kwargs.get('window_attention', dict()),
+                              correlative_attention=kwargs.get('correlative_attention', False))
 
         return roi_align(x, self._denormalize_boxes(normed_boxes, x), (1, 1),
                          1.0, -1, True)[..., 0, 0]
@@ -655,7 +685,8 @@ class EVAVisionTransformer(nn.Module):
 
     def mask_pool(self, x, masks, **kwargs):
         feature_map = self.encode_dense(x, keep_shape=False,
-                                        window_attention=kwargs.get('window_attention', dict()))
+                                        window_attention=kwargs.get('window_attention', dict()),
+                                        correlative_attention=kwargs.get('correlative_attention', False))
         num_masks_per_image = [len(masks_per_image) for masks_per_image in masks]
         masks = torch.cat(masks).float().flatten(-2, -1)    # bs, h*w
         feature_map = torch.repeat_interleave(

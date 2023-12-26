@@ -99,6 +99,11 @@ def parse_args(args):
         default="",
     )
     parser.add_argument(
+        "--correlative-attention",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--min-size",
         type=int,
         default=8,

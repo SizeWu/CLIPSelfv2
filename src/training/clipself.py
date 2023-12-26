@@ -38,8 +38,8 @@ class CLIPSelf:
             teacher_crop_features = dist_model.encode_image(image_crops, normalize=False)
         student_roi_features = model.encode_pseudo_boxes(images, rois_list, normalize=False,
                                                          extract_type=args.extract_type,
-                                                         window_size=args.window_size,
-                                                         window_block_indexes=args.window_block_indexes)
+                                                         window_attention=args.window_attention,
+                                                         correlative_attention=args.correlative_attention)
 
         normed_student_features = F.normalize(student_roi_features, dim=-1)
         normed_teacher_features = F.normalize(teacher_crop_features, dim=-1)
