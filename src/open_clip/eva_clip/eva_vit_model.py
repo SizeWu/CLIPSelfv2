@@ -220,7 +220,7 @@ class Attention(nn.Module):
                     scale=self.scale,
                     attn_bias=attn_mask  # to allow masked attention
                 )
-                x = (x_q + x_k)
+                x = (x_q + x_k) * 0.5
             else:
                 x = xops.memory_efficient_attention(
                     q, k, v,
@@ -640,13 +640,11 @@ class EVAVisionTransformer(nn.Module):
                 # TODO: window attention
                 # x: bs, sq_len, c
                 x_windows, pad_hw = window_partition(x, window_size=window_size)
-                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias,
-                                correlative_attention=correlative_attention)
+                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias)
                 x = window_unpartition(x_windows, window_size=window_size,
                                        hw=(h, w), pad_hw=pad_hw)
             else:
-                x = blk(x, rel_pos_bias=rel_pos_bias,
-                        correlative_attention=correlative_attention)
+                x = blk(x, rel_pos_bias=rel_pos_bias)
         if correlative_attention:
             x = self.blocks[-1](x, rel_pos_bias=rel_pos_bias,
                                 correlative_attention=correlative_attention)[:, 1:]
