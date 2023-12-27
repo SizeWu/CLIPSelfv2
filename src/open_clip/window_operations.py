@@ -2,12 +2,13 @@ import torch
 # import torch.nn.functional as F
 
 
-def window_partition(x, window_size=16):
+def window_partition(x, window_size=16, shift=0):
     """
     Partition into non-overlapping windows with padding if needed.
     Args:
-        x (tensor): input tokens with [B, H, W, C].
+        x (tensor): input tokens with [B, H*W, C].
         window_size (int): window size.
+        shift (int): shift to the right and bottom direction
     Returns:
         windows: windows after partition with [B * num_windows, window_size, window_size, C].
         (Hp, Wp): padded height and width before partition
@@ -19,6 +20,10 @@ def window_partition(x, window_size=16):
     B, H_W, C = x.shape
     H = W = int(H_W ** 0.5)
     x = x.view(B, H, W, C)
+
+    # shift x
+    if shift > 0:
+        x = torch.roll(x, shifts=(shift, shift), dims=(1, 2))
 
     pad_h = (window_size - H % window_size) % window_size
     pad_w = (window_size - W % window_size) % window_size
@@ -35,7 +40,7 @@ def window_partition(x, window_size=16):
     return windows, (Hp, Wp)
 
 
-def window_unpartition(windows, window_size, pad_hw, hw):
+def window_unpartition(windows, window_size, pad_hw, hw, shift=0):
     """
     Window unpartition into original sequences and removing padding.
     Args:
@@ -43,6 +48,7 @@ def window_unpartition(windows, window_size, pad_hw, hw):
         window_size (int): window size.
         pad_hw (Tuple): padded height and width (Hp, Wp).
         hw (Tuple): original height and width (H, W) before padding.
+        shift (int): shift to the left and upper direction
 
     Returns:
         x: unpartitioned sequences with [B, 1+H*W, C].
@@ -55,7 +61,14 @@ def window_unpartition(windows, window_size, pad_hw, hw):
 
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
     x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp*Wp, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+
+    # shift
+    if shift > 0:
+        x = x.view(B, Hp, Wp, -1)
+        x = torch.roll(x, shifts=(-shift, -shift), dims=(1, 2))
+
+    x = x.view(B, Hp*Wp, -1)
 
     windows_cls = windows_cls.view(B, Hp*Wp // int(window_size**2), 1, -1)
 

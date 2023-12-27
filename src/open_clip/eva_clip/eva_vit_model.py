@@ -637,12 +637,13 @@ class EVAVisionTransformer(nn.Module):
         for blk_idx, blk in enumerate(self.blocks[:-1]):
             if blk_idx in window_attention:
                 window_size = window_attention[blk_idx]['window_size']
+                shift = window_attention[blk_idx]['shift']
                 # TODO: window attention
                 # x: bs, sq_len, c
-                x_windows, pad_hw = window_partition(x, window_size=window_size)
+                x_windows, pad_hw = window_partition(x, window_size=window_size, shift=shift)
                 x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias)
                 x = window_unpartition(x_windows, window_size=window_size,
-                                       hw=(h, w), pad_hw=pad_hw)
+                                       hw=(h, w), pad_hw=pad_hw, shift=shift)
             else:
                 x = blk(x, rel_pos_bias=rel_pos_bias)
         if correlative_attention:
