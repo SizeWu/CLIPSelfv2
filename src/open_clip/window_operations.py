@@ -46,8 +46,10 @@ def window_partition(x, window_size=16, shift=0, seq_padding=0):
         assert B * partition_ids.shape[0] == windows.shape[0]
         attn_mask = x.new_zeros(partition_ids.shape[0], window_size**2 + 1 + seq_padding,
                                 window_size**2 + 1 + seq_padding)
-        attn_mask[:, -window_size**2:, -window_size**2:] \
+        attn_mask[:, seq_padding+1:, seq_padding+1:] \
             = (partition_ids[:, None, :] == partition_ids[:, :, None]).to(x.dtype)
+        attn_mask[:, seq_padding+1:, 0] = 1.0
+        attn_mask[:, :seq_padding+1, seq_padding+1:] = 1.0
 
         if seq_padding > 0:
             attn_mask[:, :seq_padding+1, :seq_padding+1] = torch.eye(seq_padding + 1,
