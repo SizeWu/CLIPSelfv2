@@ -85,7 +85,8 @@ def window_unpartition(windows, window_size, pad_hw, hw, shift=0, seq_padding=0)
         assert shift > 0
 
     windows_cls = windows[:, :1]    # cls tokens
-    windows = windows[:, 1+seq_padding:]
+    # windows = windows[:, 1+seq_padding:]
+    windows = windows[:, 1:]
 
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
     x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
