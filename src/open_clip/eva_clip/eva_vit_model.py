@@ -193,15 +193,18 @@ class Attention(nn.Module):
 
         if self.rope:
             if attn_mask is not None:
+                seq_padding = attn_mask.seq_padding
                 attn_mask = attn_mask.to(q)
+            else:
+                seq_padding = 0
             # slightly fast impl
-            q_t = q[:, :, 1:, :]
+            q_t = q[:, :, 1+seq_padding:, :]
             ro_q_t = self.rope(q_t)
-            q = torch.cat((q[:, :, :1, :], ro_q_t), -2).type_as(v)
+            q = torch.cat((q[:, :, :1+seq_padding, :], ro_q_t), -2).type_as(v)
 
-            k_t = k[:, :, 1:, :]
+            k_t = k[:, :, 1+seq_padding:, :]
             ro_k_t = self.rope(k_t)
-            k = torch.cat((k[:, :, :1, :], ro_k_t), -2).type_as(v)
+            k = torch.cat((k[:, :, :1+seq_padding, :], ro_k_t), -2).type_as(v)
         assert self.xattn, "For now we only use xattn"
         if self.xattn:
             q = q.permute(0, 2, 1, 3)   # B, num_heads, N, C -> B, N, num_heads, C
@@ -607,6 +610,16 @@ class EVAVisionTransformer(nn.Module):
         x = self.head(x)
         return x
 
+    def process_attention_mask(self, attn_mask, seq_padding):
+        if attn_mask is None:
+            return attn_mask
+        attn_mask = attn_mask[:, None].repeat(1, self.num_heads, 1, 1)
+        new_mask = torch.zeros_like(attn_mask)
+        new_mask[attn_mask < 1.0] = float('-inf')
+        new_mask.seq_padding = seq_padding
+
+        return new_mask
+
     def encode_dense(self, x, keep_shape=True, window_attention=dict(),
                      correlative_attention=False):
         bs, _, h, w = x.shape
@@ -638,12 +651,15 @@ class EVAVisionTransformer(nn.Module):
             if blk_idx in window_attention:
                 window_size = window_attention[blk_idx]['window_size']
                 shift = window_attention[blk_idx]['shift']
+                seq_padding = window_attention[blk_idx].get('seq_padding', 0)
                 # TODO: window attention
                 # x: bs, sq_len, c
-                x_windows, pad_hw = window_partition(x, window_size=window_size, shift=shift)
-                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias)
+                x_windows, pad_hw, attn_mask = window_partition(x, window_size=window_size, shift=shift,
+                                                                seq_padding=seq_padding)
+                attn_mask = self.process_attention_mask(attn_mask, seq_padding=seq_padding)
+                x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask)
                 x = window_unpartition(x_windows, window_size=window_size,
-                                       hw=(h, w), pad_hw=pad_hw, shift=shift)
+                                       hw=(h, w), pad_hw=pad_hw, shift=shift, seq_padding=seq_padding)
             else:
                 x = blk(x, rel_pos_bias=rel_pos_bias)
         if correlative_attention:

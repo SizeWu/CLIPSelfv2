@@ -12,5 +12,5 @@ vitl14_ss16 = {i: dict(window_size=16,    # 1/4 for 896
 vitb16_shift8_ss16 = {i: dict(window_size=16, shift=0)
                       for i in [0, 3, 6, 9]}
 
-vitb16_shift8_ss16.update({i: dict(window_size=16, shift=8)
+vitb16_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
                            for i in [1, 4, 7, 10]})
