@@ -6,6 +6,11 @@ class_weight = [
     0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0, 1.0, 0, 1.0, 1.0,
     1.0, 1.0, 1.0, 1.0, 0, 1.0, 1.0, 1.0, 0, 1.0, 1.0, 1.0, 1.0, 0, 1.0, 0.6
 ]
+vitb16_shift8_ss16 = {i: dict(window_size=16, shift=0)
+                      for i in [0, 1, 3, 4, 6, 7, 9, 10]}
+
+vitb16_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
+                           for i in [2, 5, 8, 11]})
 norm_cfg = dict(type='SyncBN', requires_grad=True)
 model = dict(
     type='FViT',
@@ -15,8 +20,7 @@ model = dict(
         pretrained='checkpoints/EVA02_CLIP_B_psz16_s8B.pt',
         norm_cfg=norm_cfg,
         out_indices=[3, 5, 7, 11],
-        window_attention={i: dict(window_size=16,
-                                  shift=0) for i in [0, 1, 3, 4, 6, 7, 9, 10]}
+        window_attention=vitb16_shift8_ss16
     ),
     neck=dict(
         type='FPN',

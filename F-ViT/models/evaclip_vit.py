@@ -10,12 +10,14 @@ from mmcv.utils.logging import print_log
 from mmcv.cnn import build_norm_layer
 
 
-def window_partition(x, window_size=16):
+def window_partition(x, window_size=16, shift=0, seq_padding=0):
     """
     Partition into non-overlapping windows with padding if needed.
     Args:
-        x (tensor): input tokens with [B, H, W, C].
+        x (tensor): input tokens with [B, H*W, C].
         window_size (int): window size.
+        shift (int): shift to the left and upper direction
+        seq_padding (int): pad the sequence so that the length is divisible by 8. for x-formers
     Returns:
         windows: windows after partition with [B * num_windows, window_size, window_size, C].
         (Hp, Wp): padded height and width before partition
@@ -28,6 +30,10 @@ def window_partition(x, window_size=16):
     H = W = int(H_W ** 0.5)
     x = x.view(B, H, W, C)
 
+    # shift x
+    if shift > 0:
+        x = torch.roll(x, shifts=(-shift, -shift), dims=(1, 2))
+
     pad_h = (window_size - H % window_size) % window_size
     pad_w = (window_size - W % window_size) % window_size
     assert pad_h == 0 and pad_w == 0, f"For now we do not allow additional padding"
@@ -37,32 +43,69 @@ def window_partition(x, window_size=16):
 
     x = x.view(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size * window_size, C)
-    x_cls = x_cls.repeat(1, Hp*Wp // int(window_size**2), 1).view(-1, 1, C)
+
+    # TODO: make attention mask
+    if shift > 0:
+        partition_ids = torch.zeros(Hp, Wp, dtype=torch.int32, device=x.device)
+        partition_ids[shift:, shift:] = 1
+        partition_ids = torch.roll(partition_ids, shifts=(-shift, -shift), dims=(0, 1))
+        partition_ids = partition_ids.view(Hp // window_size, window_size, Wp // window_size, window_size)
+        partition_ids = partition_ids.permute(0, 2, 1, 3).contiguous().view(-1, window_size * window_size)
+        assert B * partition_ids.shape[0] == windows.shape[0]
+        attn_mask = x.new_zeros(partition_ids.shape[0], window_size**2 + 1 + seq_padding,
+                                window_size**2 + 1 + seq_padding)
+        attn_mask[:, seq_padding+1:, seq_padding+1:] \
+            = (partition_ids[:, None, :] == partition_ids[:, :, None]).to(x.dtype)
+        attn_mask[:, seq_padding+1:, 0] = 1.0
+        attn_mask[:, :seq_padding+1, seq_padding+1:] = 1.0
+
+        attn_mask[:, :seq_padding+1, :seq_padding+1] = torch.eye(seq_padding + 1,
+                                                                 device=x.device, dtype=x.dtype)[None]
+        attn_mask = attn_mask[None].repeat(B, 1, 1, 1).flatten(0, 1)
+        x_cls = x_cls.repeat(1, seq_padding+1, 1)
+        # attn_mask = None
+    else:
+        attn_mask = None
+
+    x_cls = torch.repeat_interleave(x_cls, dim=0, repeats=Hp * Wp // int(window_size ** 2))
     windows = torch.cat([x_cls, windows], dim=1)
 
-    return windows, (Hp, Wp)
+    return windows, (Hp, Wp), attn_mask
 
-def window_unpartition(windows, window_size, pad_hw, hw):
+
+def window_unpartition(windows, window_size, pad_hw, hw, shift=0, seq_padding=0):
     """
     Window unpartition into original sequences and removing padding.
     Args:
-        x (tensor): input tokens with [B * num_windows, 1+window_size*window_size, C].
+        windows (tensor): input tokens with [B * num_windows, 1+window_size*window_size, C].
         window_size (int): window size.
         pad_hw (Tuple): padded height and width (Hp, Wp).
         hw (Tuple): original height and width (H, W) before padding.
+        shift (int): shift to the right and bottom direction.
+        seq_padding (int): pad the sequence so that the length is divisible by 8 for x-formers
 
     Returns:
         x: unpartitioned sequences with [B, 1+H*W, C].
     """
     Hp, Wp = pad_hw
     H, W = hw
+    if seq_padding > 0:
+        assert shift > 0
 
     windows_cls = windows[:, :1]    # cls tokens
-    windows = windows[:, 1:]
+    windows = windows[:, 1+seq_padding:]
+    # windows = windows[:, 1:]
 
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
     x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp*Wp, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+
+    # shift
+    if shift > 0:
+        x = x.view(B, Hp, Wp, -1)
+        x = torch.roll(x, shifts=(shift, shift), dims=(1, 2))
+
+    x = x.view(B, Hp*Wp, -1)
 
     windows_cls = windows_cls.view(B, Hp*Wp // int(window_size**2), 1, -1)
 
@@ -75,17 +118,15 @@ def window_unpartition(windows, window_size, pad_hw, hw):
     return x
 
 
-
 @BACKBONES.register_module()
 class EvaCLIPViT(BaseModule):
     def __init__(self, model_name, pretrained, out_indices=[3, 5, 7, 11], norm_cfg=None,
-                 window_size=16, window_block_indexes=[]):
+                 window_attention=dict()):
         super().__init__()
         self.vit_layers = out_indices
         self.model_name = model_name
         self.pretrained = pretrained  # the pretrained .pt file
-        self.window_size = window_size
-        self.window_block_indexes = window_block_indexes
+        self.window_attention = window_attention
         clip_model = open_clip.create_model(model_name,
                                             pretrained="eva",
                                             cache_dir=pretrained)
@@ -157,16 +198,23 @@ class EvaCLIPViT(BaseModule):
             rel_pos_bias = visual.rel_pos_bias() if visual.rel_pos_bias is not None else None
 
             outs = []
-            for i, blk in enumerate(visual.blocks[:-1]):
-                if i in self.window_block_indexes:
-                    x_windows, pad_hw = window_partition(x, window_size=self.window_size)
-                    x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias)
-                    x = window_unpartition(x_windows, window_size=self.window_size,
-                                           hw=(h, w), pad_hw=pad_hw)
+            for blk_idx, blk in enumerate(visual.blocks[:-1]):
+                if blk_idx in self.window_attention:
+                    window_size = self.window_attention[blk_idx]['window_size']
+                    shift = self.window_attention[blk_idx]['shift']
+                    seq_padding = self.window_attention[blk_idx].get('seq_padding', 0)
+                    # TODO: window attention
+                    # x: bs, sq_len, c
+                    x_windows, pad_hw, attn_mask = window_partition(x, window_size=window_size, shift=shift,
+                                                                    seq_padding=seq_padding)
+                    attn_mask = visual.process_attention_mask(attn_mask, seq_padding=seq_padding)
+                    x_windows = blk(x_windows, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask)
+                    x = window_unpartition(x_windows, window_size=window_size,
+                                           hw=(h, w), pad_hw=pad_hw, shift=shift, seq_padding=seq_padding)
                 else:
                     x = blk(x, rel_pos_bias=rel_pos_bias)
                 # x = blk(x, rel_pos_bias=rel_pos_bias)
-                if i in self.vit_layers:
+                if blk_idx in self.vit_layers:
                     outs.append(self._expand_x(x, h, w))
             x = visual.blocks[-1].forward_without_attn(x)
             if (len(visual.blocks) - 1) in self.vit_layers:
