@@ -8,15 +8,19 @@ vitl14_ss16 = {i: dict(window_size=16,    # 1/4 for 896
                        shift=0) for i in list(range(0, 5)) + list(range(6, 11)) \
                                         + list(range(12, 17)) + list(range(18, 23))}
 
-vitb16_shift8_ss16 = {i: dict(window_size=16, shift=0)
-                      for i in [0, 1, 3, 4, 6, 7, 9, 10]}
+# vitb16_shift8_ss16 = {i: dict(window_size=16, shift=0)
+#                       for i in [0, 1, 3, 4, 6, 7, 9, 10]}
+#
+# vitb16_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
+#                            for i in [2, 5, 8, 11]})
+#
+# vitl14_shift8_ss16 = {i: dict(window_size=16,    # 1/4 for 896
+#                        shift=0) for i in list(range(0, 5)) + list(range(6, 11)) \
+#                                         + list(range(12, 17)) + list(range(18, 23))}
+#
+# vitl14_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
+#                            for i in [5, 11, 17, 23]})
 
-vitb16_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
-                           for i in [2, 5, 8, 11]})
 
-vitl14_shift8_ss16 = {i: dict(window_size=16,    # 1/4 for 896
-                       shift=0) for i in list(range(0, 5)) + list(range(6, 11)) \
-                                        + list(range(12, 17)) + list(range(18, 23))}
-
-vitl14_shift8_ss16.update({i: dict(window_size=16, shift=8, seq_padding=8-1)
-                           for i in [5, 11, 17, 23]})
+vitb16_ss16v2 = {i: dict(window_size=16, shift=0) for i in range(12)}
+vitl14_ss16v2 = {i: dict(window_size=16, shift=0) for i in range(24)}
