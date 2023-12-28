@@ -4,6 +4,8 @@
 vitb16_ss16 = {i: dict(window_size=16,     # 1/4 for 1024
                        shift=0) for i in [0, 1, 3, 4, 6, 7, 9, 10]}
 
+vitb16_ss16v2 = {i: dict(window_size=16, shift=0) for i in range(12)}
+
 
 vitl14_ss16 = {i: dict(window_size=16,    # 1/4 for 896
                        shift=0) for i in list(range(0, 5)) + list(range(6, 11)) \
