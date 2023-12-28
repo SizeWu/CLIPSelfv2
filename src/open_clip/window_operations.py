@@ -51,9 +51,8 @@ def window_partition(x, window_size=16, shift=0, seq_padding=0):
         attn_mask[:, seq_padding+1:, 0] = 1.0
         attn_mask[:, :seq_padding+1, seq_padding+1:] = 1.0
 
-        if seq_padding > 0:
-            attn_mask[:, :seq_padding+1, :seq_padding+1] = torch.eye(seq_padding + 1,
-                                                                     device=x.device, dtype=x.dtype)[None]
+        attn_mask[:, :seq_padding+1, :seq_padding+1] = torch.eye(seq_padding + 1,
+                                                                 device=x.device, dtype=x.dtype)[None]
         attn_mask = attn_mask[None].repeat(B, 1, 1, 1).flatten(0, 1)
         x_cls = x_cls.repeat(1, seq_padding+1, 1)
     else:
