@@ -95,7 +95,7 @@ class CLIPSelfMask:
                 features = feature_map[mask > 0.0]
                 similarities.append((features @ features.T).mean())
 
-        loss_smooth = sum(similarities) / len(similarities)
+        loss_smooth = 1.0 - sum(similarities) / len(similarities)
 
         losses = dict(loss_cosine=loss_cosine*args.cosine_weight,
                       loss_smooth=loss_smooth*args.smooth_weight)
