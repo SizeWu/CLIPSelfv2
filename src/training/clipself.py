@@ -86,18 +86,17 @@ class CLIPSelfMask:
         loss_cosine = 1.0 - (normed_student_features *
                              normed_teacher_features).sum(-1).mean()
 
-        similarities = []
-        for gt_masks_per_image, feature_map in zip(gt_masks, feature_maps):
-            valid = gt_masks_per_image.sum((-2, -1)) > 2
-            feature_map = feature_map.permute(1, 2, 0)
-            gt_masks_per_image = gt_masks_per_image[valid]
-            for mask in gt_masks_per_image:
-                features = feature_map[mask > 0.0]
-                similarities.append((features @ features.T).mean())
-
-        loss_smooth = 1.0 - sum(similarities) / len(similarities)
-
-        losses = dict(loss_cosine=loss_cosine*args.cosine_weight,
-                      loss_smooth=loss_smooth*args.smooth_weight)
+        losses = dict(loss_cosine=loss_cosine*args.cosine_weight)
+        if args.smooth_weight > 0.0:
+            similarities = []
+            for gt_masks_per_image, feature_map in zip(gt_masks, feature_maps):
+                valid = gt_masks_per_image.sum((-2, -1)) > 2
+                feature_map = feature_map.permute(1, 2, 0)
+                gt_masks_per_image = gt_masks_per_image[valid]
+                for mask in gt_masks_per_image:
+                    features = feature_map[mask > 0.0]
+                    similarities.append((features @ features.T).mean())
+            loss_smooth = 1.0 - sum(similarities) / len(similarities)
+            losses.update(loss_smooth=loss_smooth*args.smooth_weight)
 
         return losses, len(images), model.logit_scale.exp()
