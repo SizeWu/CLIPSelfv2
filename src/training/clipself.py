@@ -77,7 +77,7 @@ class CLIPSelfMask:
                                           window_attention=args.window_attention,
                                           correlative_attention=args.correlative_attention)
         student_roi_features = roi_align(feature_maps,
-                                         model.visual._denormalize_boxes(normed_boxes, feature_maps),
+                                         model.visual._denormalize_boxes(rois_list, feature_maps),
                                          (1, 1), 1.0, -1, True)[..., 0, 0]
 
         normed_student_features = F.normalize(student_roi_features, dim=-1)
