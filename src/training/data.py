@@ -483,7 +483,7 @@ class MaskDistillDataset(COCOPanopticDataset):
                                                               random.choice(self.choices),
                                                               self.max_anns - num_boxes)
             assert grid_crops.shape[0] == grid_boxes.shape[0]
-            num_grids = image_crops.shape[0]
+            num_grids = grid_crops.shape[0]
             image_crops[num_boxes:num_boxes+num_grids] = grid_crops
             boxes_template[num_boxes:num_boxes+num_grids, :4] = grid_boxes
             boxes_template[num_boxes:num_boxes+num_grids, 4] = 1.0
