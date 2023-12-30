@@ -287,6 +287,7 @@ class COCOPanopticDataset(Dataset):
                  crop_size=224,
                  tokenizer=None,
                  downsample_factor=16,
+                 args=None,
                  min_size=8, max_size=1024):
         logging.debug(f'Loading coco caption style data from {input_filename}.')
         self.coco = COCOPanoptic(input_filename)
@@ -311,6 +312,7 @@ class COCOPanopticDataset(Dataset):
         cat_ids = sorted([cat['id'] for cat in self.coco.cats.values()])
 
         self.cat_id2label = {cat_id: label for label, cat_id in enumerate(cat_ids)}
+        self.args = args
 
     def __len__(self):
         return len(self.image_ids)
@@ -385,6 +387,114 @@ class COCOPanopticDataset(Dataset):
         boxes_template[:, [1, 3]] /= h
 
         return new_image, boxes_template, image_crops, gt_masks, masked_image_crops
+
+
+class MaskDistillDataset(COCOPanopticDataset):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.max_anns = 40
+        self._init_choices(self.args.max_split)
+        self._init_boxes()
+
+    def _init_choices(self, M=16):
+        choices = []
+        for m in range(1, M+1):
+            for n in range((m + 1)//2, min(m*2 + 1, M+1)):
+                choices.append((m, n))
+        self.choices = choices
+
+    def _init_boxes(self, ):
+        box_templates = {}
+        for choice in self.choices:
+            M, N = choice
+            grid_x, grid_y = torch.meshgrid(torch.linspace(0, 1, N + 1), torch.linspace(0, 1, M + 1),
+                                            indexing='xy')
+            x0y0s = torch.stack([grid_x[:M, :N], grid_y[:M, :N]], dim=-1)
+            x1y1s = torch.stack([grid_x[1:, 1:], grid_y[1:, 1:]], dim=-1)
+            pseudo_boxes = torch.cat([x0y0s, x1y1s],
+                                     dim=-1).view(-1, 4)
+            assert pseudo_boxes.shape[0] == M*N
+            box_templates[choice] = pseudo_boxes
+
+        self.box_templates = box_templates
+
+    def _obtain_image_crops(self, image, choice, max_boxes):
+        image_crops = []
+        img_w, img_h = image.size
+        normed_boxes = self.box_templates[choice]
+        indices = list(range(len(normed_boxes)))
+        random.shuffle(indices)
+        indices = indices[:max_boxes]
+        boxes = normed_boxes * torch.tensor([img_w, img_h, img_w, img_h])
+        for idx in indices:
+            box = boxes[idx]
+            x0, y0, x1, y1 = box.tolist()    # todo expand
+            image_crops.append(self.transforms[1](image.crop((x0, y0, x1, y1))))
+
+        return torch.stack(image_crops), boxes[indices]
+
+
+    def __getitem__(self, idx):
+        image_id = self.image_ids[idx]
+        image_info = self.coco.imgs[image_id]
+        image_name = image_info['file_name']
+        segm_file = image_info['segm_file']
+        image_path = os.path.join(self.image_root, image_name)
+        segm_path = os.path.join(self.segm_root, segm_file)
+        segm_map = self._load_segm(segm_path)
+
+        old_image = Image.open(image_path)
+        img_w, img_h = old_image.width, old_image.height
+        new_image = self.transforms[0](old_image)
+
+        scale = get_scale(old_image, new_image)
+        anns = self.coco.imgToAnns[image_id]
+        boxes_template = torch.zeros(self.max_anns, 4 + 1)  # xyxy valid
+        image_crops = torch.zeros(self.max_anns, 3, *self.crop_size)
+        gt_masks = torch.zeros(self.max_anns, self.segm_transform.max_size,
+                               self.segm_transform.max_size)
+        num_boxes = 0
+        num_masks = 0
+
+        for ann in anns:
+            if num_masks == self.max_anns:
+                break
+            cat_id = ann['category_id']
+            is_thing = self.coco.cats[cat_id]['isthing']
+            if is_thing > 0:
+                x, y, w, h = ann['bbox']
+                cx, cy = x + w * 0.5, y + h * 0.5
+                x0, y0, x1, y1 = \
+                    max(cx - w * 0.75, 0), max(cy - h * 0.75, 0), min(cx + w * 0.75, img_w), min(cy + h * 0.75, img_h)
+                if w * h < (self.min_size ** 2) or w * h > (self.max_size ** 2):
+                    continue
+                image_crops[num_boxes] = self.transforms[1](old_image.crop((x0, y0, x1, y1)))  # image crops
+                box_info = torch.tensor([x, y, x + w, y + h, 1.0])  # x, y, x + w, y + h
+                boxes_template[num_boxes] = box_info
+                num_boxes += 1
+
+            gt_mask = torch.from_numpy(segm_map == ann['id']).float()
+            gt_mask = self.segm_transform(gt_mask[None]) > 0.0
+            gt_masks[num_masks] = gt_mask[0].float()
+            num_masks += 1
+
+        if num_boxes < self.max_anns:
+            grid_crops, grid_boxes = self._obtain_image_crops(old_image,
+                                                              random.choice(self.choices),
+                                                              self.max_anns - num_boxes)
+            assert grid_crops.shape[0] == grid_boxes.shape[0]
+            num_grids = image_crops.shape[0]
+            image_crops[num_boxes:num_boxes+num_grids] = grid_crops
+            boxes_template[num_boxes:num_boxes+num_grids, :4] = grid_boxes
+            boxes_template[num_boxes:num_boxes+num_grids, 4] = 1.0
+
+        _, h, w = new_image.shape
+
+        boxes_template[:, :4] *= scale
+        boxes_template[:, [0, 2]] /= w
+        boxes_template[:, [1, 3]] /= h
+
+        return new_image, boxes_template, image_crops, gt_masks
 
 
 class COCORegionCLIPDataset(Dataset):
@@ -551,7 +661,8 @@ def get_coco_panoptic_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=
         crop_size=args.input_size,
         min_size=args.min_size,
         max_size=args.max_size,
-        downsample_factor=args.downsample_factor
+        downsample_factor=args.downsample_factor,
+        args=args,
     )
     num_samples = len(dataset)
     # TODO: distributed for test
@@ -642,6 +753,43 @@ def get_grid_distill_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=N
     return DataInfo(dataloader, sampler)
 
 
+def get_mask_distill_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
+    assert is_train
+    input_filename = args.train_data
+    assert input_filename
+    dataset = MaskDistillDataset(
+        input_filename=input_filename,
+        transforms=preprocess_fn,
+        segm_root=args.train_segm_root,
+        image_root=args.train_image_root,
+        embed_path=args.embed_path,
+        tokenizer=tokenizer,
+        crop_size=args.input_size,
+        min_size=args.min_size,
+        max_size=args.max_size,
+        downsample_factor=args.downsample_factor,
+        args=args,
+    )
+    num_samples = len(dataset)
+    # TODO: distributed for test
+    sampler = DistributedSampler(dataset) if args.distributed else None  #  and is_train else None
+    shuffle = is_train and sampler is None
+    batch_size = args.batch_size
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=args.workers,
+        pin_memory=True,
+        sampler=sampler,
+        drop_last=is_train,
+    )
+    dataloader.num_samples = num_samples
+    dataloader.num_batches = len(dataloader)
+
+    return DataInfo(dataloader, sampler)
+
+
 def get_region_clip_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
     assert is_train
     input_filename = args.train_data
@@ -706,6 +854,8 @@ def get_dataset_fn(data_path, dataset_type):
         return get_proposal_distill_dataset
     elif dataset_type == 'grid_distill':
         return get_grid_distill_dataset
+    elif dataset_type == 'mask_distill':
+        return get_mask_distill_dataset
     elif dataset_type == 'region_clip':
         return get_region_clip_dataset
     else:

@@ -332,8 +332,7 @@ def create_model_and_transforms(
             aug_cfg=aug_cfg)
     elif dataset_type is not None:
         preprocess_train = [preprocess_val_det, preprocess_val_img] \
-            if 'distill' in dataset_type or dataset_type == 'region_clip'\
-               or dataset_type in ['clipself', 'clipself_proposals', "coop"] \
+            if 'distill' in dataset_type or dataset_type == 'region_clip' \
             else image_transform(model.visual.image_size,
                                  is_train=True,
                                  mean=image_mean,

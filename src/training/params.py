@@ -236,7 +236,7 @@ def parse_args(args):
     )
     parser.add_argument(
         "--dataset-type",
-        choices=['proposals_distill', "region_clip", "grid_distill"],
+        choices=['proposals_distill', "region_clip", "grid_distill", "mask_distill"],
         default="grid_distill",
         help="Which type of dataset to process."
     )

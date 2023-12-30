@@ -7,7 +7,7 @@ import sys
 import random
 from datetime import datetime
 from training.region_clip import RegionCLIP
-from training.clipself import CLIPSelf
+from training.clipself import CLIPSelf, CLIPSelfMask
 import numpy as np
 import torch
 from torch import optim
@@ -138,6 +138,8 @@ def main(args):
     args.input_size = model.visual.image_size
     if args.dataset_type in ['grid_distill', 'proposals_distill']:
         method = CLIPSelf()
+    elif args.dataset_type == 'mask_distill':
+        method = CLIPSelfMask()
     elif args.dataset_type == 'region_clip':
         method = RegionCLIP(args=args).to(device)
     else:
